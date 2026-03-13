@@ -212,6 +212,12 @@ aws dynamodb list-tables --profile hollownet
 
 ---
 
+## Known Constraints
+
+- Python 3.11+ expanded `ip_address.is_private` to include TEST-NET ranges (203.0.113.0/24 etc). Use 1.2.3.4 as public IP in tests, never 203.0.113.x  # added 2026-03-13: Python ip_address behavior in tests
+
+---
+
 ## Self-Modification Protocol
 
 If you (Claude/agent) notice a recurring error or new constraint:
