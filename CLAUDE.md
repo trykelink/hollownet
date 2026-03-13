@@ -207,6 +207,7 @@ aws dynamodb list-tables --profile hollownet
 - Don't query ip-api or AbuseIPDB without checking cache first
 - Don't deploy Lambda without updating the `.pkl` version reference in S3
 - Don't use `SELECT *` patterns in DynamoDB — always specify attributes
+- Don't redact credentials in HoneypotEvent — captured passwords are intentional ML training data  # added 2026-03-13: parser should preserve credential features for training
 - Don't add rules to this file that are already enforced by linters
 
 ---
