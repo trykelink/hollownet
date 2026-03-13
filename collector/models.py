@@ -1,4 +1,4 @@
-"""Pydantic models for normalized honeypot events."""
+"""Pydantic models for normalized honeypot events and API responses."""
 
 from __future__ import annotations
 
@@ -54,3 +54,67 @@ class IPEnrichment(BaseModel):
     abuse_score: int = 0
     total_reports: int = 0
     cached_at: str  # ISO8601
+
+
+class EnrichedEvent(HoneypotEvent):
+    """Honeypot event augmented with IP enrichment fields."""
+
+    country: Optional[str] = None
+    country_code: Optional[str] = None
+    city: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    isp: Optional[str] = None
+    abuse_score: int = 0
+    total_reports: int = 0
+
+
+class ErrorResponse(BaseModel):
+    """Consistent API error envelope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    error: str
+    detail: str
+
+
+class HealthResponse(BaseModel):
+    """Collector health endpoint response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    cowrie: str
+
+
+class TopIP(BaseModel):
+    """Top source IP aggregate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+    count: int
+    country: Optional[str] = None
+    abuse_score: int = 0
+
+
+class TopCredential(BaseModel):
+    """Top attempted credential tuple aggregate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: str
+    password: str
+    count: int
+
+
+class StatsResponse(BaseModel):
+    """Collector dashboard aggregate response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_events: int
+    events_today: int
+    top_ips: list[TopIP]
+    top_credentials: list[TopCredential]
+    events_by_type: dict[str, int]
