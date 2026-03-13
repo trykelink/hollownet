@@ -75,7 +75,7 @@ Dashboard: Next.js → S3 + CloudFront
 
 - **AWS region:** `us-east-1`
 - **AWS profile:** `hollownet`
-- **Zenbook IP (local):** `192.168.1.237`
+- **Zenbook IP (local):** see `HONEYPOT_HOST` env var (LAN only, never expose publicly)
 - **Zenbook SSH port:** `2200` (22 is reserved for Cowrie)
 - **Cowrie port:** `2222`
 - **Cowrie user:** `cowrie` (disabled password, dedicated system user)
@@ -157,7 +157,7 @@ Trigger alert when:
 
 ```bash
 # Connect to Zenbook
-ssh zenbook  # alias: nacho@192.168.1.237 -p 2200
+ssh zenbook  # configured in ~/.ssh/config (see HONEYPOT_HOST)
 
 # Cowrie (on Zenbook, as cowrie user)
 sudo systemctl status cowrie
@@ -208,6 +208,7 @@ aws dynamodb list-tables --profile hollownet
 - Don't deploy Lambda without updating the `.pkl` version reference in S3
 - Don't use `SELECT *` patterns in DynamoDB — always specify attributes
 - Don't redact credentials in HoneypotEvent — captured passwords are intentional ML training data  # added 2026-03-13: parser should preserve credential features for training
+- Never put real IPs, AWS account IDs, or ARNs in CLAUDE.md — use env var references
 - Don't add rules to this file that are already enforced by linters
 
 ---
