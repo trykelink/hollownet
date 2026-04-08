@@ -61,7 +61,24 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
     restart: unless-stopped
 
+  ml:
+    build: ./ml
+    container_name: hollownet-ml
+    profiles: ["ml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    volumes:
+      - ml_models:/app/models
+    restart: "no"
+
 volumes:
   postgres_data:
   cowrie_logs:
   grafana_data:
+  ml_models:
