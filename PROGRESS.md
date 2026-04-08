@@ -30,3 +30,5 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 - [2026-04-08] Normalized returned IP intel datetimes across backends
 - [2026-04-08] Added collector service, Dockerfile, and .env.example to compose
 - [2026-04-08] Moved POSTGRES_PASSWORD to env; added non-root user to Dockerfile
+- [2026-04-08] Switched Cowrie log reads to Docker archive streaming
+- [2026-04-08] Replaced exec_run with get_archive for shell-free Cowrie log reading
