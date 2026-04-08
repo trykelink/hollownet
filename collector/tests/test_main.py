@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
+import tarfile
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from collector.app.database import DatabaseSettings, build_async_engine, create_session_factory, init_database
-from collector.app.main import CollectorService, CollectorSettings, create_app
+from collector.app.main import (
+    CollectorService,
+    CollectorSettings,
+    CowrieDockerLogSource,
+    DockerException,
+    NotFound,
+    create_app,
+)
 from collector.app.models import EventRecord
 
 
@@ -38,6 +48,18 @@ class StubEnricher:
         last_seen: datetime | None = None,
     ) -> None:
         self.calls.append((ip, last_seen))
+
+
+def _build_archive_bytes(file_name: str, content: str) -> bytes:
+    buffer = BytesIO()
+    data = content.encode("utf-8")
+
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        tar_info = tarfile.TarInfo(name=file_name)
+        tar_info.size = len(data)
+        archive.addfile(tar_info, BytesIO(data))
+
+    return buffer.getvalue()
 
 
 @pytest.mark.asyncio
@@ -74,6 +96,82 @@ async def test_collector_service_persists_new_events_and_skips_duplicates(
     assert second_insert_count == 0
     assert stored_count == 1
     await engine.dispose()
+
+
+def test_cowrie_docker_log_source_reads_lines_from_archive() -> None:
+    archive_bytes = _build_archive_bytes(
+        "cowrie.json",
+        '{"eventid":"cowrie.login.failed"}\n{"eventid":"cowrie.command.input"}\n',
+    )
+    container = Mock()
+    container.get_archive.return_value = ([archive_bytes], {"name": "cowrie.json"})
+    docker_client = Mock()
+    docker_client.containers.get.return_value = container
+
+    log_source = CowrieDockerLogSource(
+        "test-cowrie",
+        docker_client=docker_client,
+    )
+
+    lines = log_source._read_lines_sync()
+
+    assert lines == [
+        '{"eventid":"cowrie.login.failed"}',
+        '{"eventid":"cowrie.command.input"}',
+    ]
+    container.get_archive.assert_called_once()
+
+
+def test_cowrie_docker_log_source_returns_empty_lines_for_nonzero_exit_code() -> None:
+    container = Mock()
+    container.get_archive.return_value = ([b"ignored"], 1)
+    docker_client = Mock()
+    docker_client.containers.get.return_value = container
+
+    log_source = CowrieDockerLogSource(
+        "test-cowrie",
+        docker_client=docker_client,
+    )
+
+    assert log_source._read_lines_sync() == []
+
+
+def test_cowrie_docker_log_source_returns_empty_lines_when_container_missing() -> None:
+    docker_client = Mock()
+    docker_client.containers.get.side_effect = NotFound("missing")
+
+    log_source = CowrieDockerLogSource(
+        "test-cowrie",
+        docker_client=docker_client,
+    )
+
+    assert log_source._read_lines_sync() == []
+
+
+def test_cowrie_docker_log_source_returns_empty_lines_on_docker_exception() -> None:
+    docker_client = Mock()
+    docker_client.containers.get.side_effect = DockerException("docker failure")
+
+    log_source = CowrieDockerLogSource(
+        "test-cowrie",
+        docker_client=docker_client,
+    )
+
+    assert log_source._read_lines_sync() == []
+
+
+def test_cowrie_docker_log_source_returns_empty_lines_for_invalid_tar_archive() -> None:
+    container = Mock()
+    container.get_archive.return_value = ([b"not-a-tar-archive"], {"name": "cowrie.json"})
+    docker_client = Mock()
+    docker_client.containers.get.return_value = container
+
+    log_source = CowrieDockerLogSource(
+        "test-cowrie",
+        docker_client=docker_client,
+    )
+
+    assert log_source._read_lines_sync() == []
 
 
 def test_create_app_exposes_health_and_recent_events(tmp_path: Path) -> None:

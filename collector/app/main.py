@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
-import shlex
+import tarfile
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -107,10 +108,7 @@ class CowrieDockerLogSource:
                 self._docker_client = docker.from_env()
 
             container = self._docker_client.containers.get(self._container_name)
-            command = (
-                f"sh -lc {shlex.quote(f'test -f {self._cowrie_log_path} && cat {self._cowrie_log_path} || true')}"
-            )
-            exec_result = container.exec_run(command)
+            archive_result = container.get_archive(self._cowrie_log_path)
         except NotFound:
             logger.warning("Cowrie container %s was not found", self._container_name)
             return []
@@ -118,12 +116,16 @@ class CowrieDockerLogSource:
             logger.exception("Failed to read Cowrie logs via Docker SDK")
             return []
 
-        exit_code, output = _decode_exec_result(exec_result)
+        exit_code, output = _decode_archive_result(archive_result)
         if exit_code not in (0, None):
             logger.warning("Cowrie log read returned exit code %s", exit_code)
             return []
 
-        return output.decode("utf-8", errors="ignore").splitlines()
+        try:
+            return _extract_tar_file_lines(output)
+        except (tarfile.TarError, OSError):
+            logger.exception("Failed to extract Cowrie log archive from Docker SDK")
+            return []
 
 
 class CollectorService:
@@ -302,11 +304,29 @@ def create_app(
     return app
 
 
-def _decode_exec_result(exec_result: Any) -> tuple[int | None, bytes]:
-    if isinstance(exec_result, tuple):
-        return exec_result[0], exec_result[1]
+def _decode_archive_result(archive_result: Any) -> tuple[int | None, bytes]:
+    if isinstance(archive_result, tuple):
+        stream, metadata = archive_result
+        exit_code = metadata if isinstance(metadata, int) else None
+        return exit_code, b"".join(stream)
 
-    return getattr(exec_result, "exit_code", None), getattr(exec_result, "output", b"")
+    return getattr(archive_result, "exit_code", None), getattr(archive_result, "output", b"")
+
+
+def _extract_tar_file_lines(archive_bytes: bytes) -> list[str]:
+    tar_buffer = io.BytesIO(archive_bytes)
+    with tarfile.open(fileobj=tar_buffer, mode="r:*") as archive:
+        for member in archive:
+            if not member.isfile():
+                continue
+
+            extracted_file = archive.extractfile(member)
+            if extracted_file is None:
+                continue
+
+            return extracted_file.read().decode("utf-8", errors="ignore").splitlines()
+
+    return []
 
 
 try:
