@@ -27,6 +27,7 @@ class TelegramNotifier:
 
     @property
     def is_configured(self) -> bool:
+        """Return True if both token and chat_id are set."""
         return bool(self._bot_token and self._chat_id)
 
     async def send(self, message: str) -> None:
