@@ -34,4 +34,6 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 - [2026-04-08] Replaced exec_run with get_archive for shell-free Cowrie log reading
 - [2026-04-08] Added configurable collector logging via LOG_LEVEL
 - [2026-04-08] Fixed collector logging levels under Uvicorn startup
+- [2026-04-08] Added Telegram alerts for brute force and successful logins
 - [2026-04-08] Fixed event deduplication by deriving per-event IDs
+- [2026-04-08] Added Telegram notifier and CollectorService alert triggers
