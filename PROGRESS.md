@@ -40,3 +40,5 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 - [2026-04-08] Added Grafana provisioning and Hollownet threat dashboard
 - [2026-04-08] Made Grafana root URL configurable via environment
 - [2026-04-08] Added brute force alert cooldown by source IP
+- [2026-04-08] Added ML anomaly scoring pipeline and daily reporting
+- [2026-04-08] Added ML review fixes with non-root Dockerfile and mocked tests
