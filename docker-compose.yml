@@ -33,6 +33,8 @@ services:
         postgres:
           condition: service_healthy
       env_file: .env
+      environment:
+        LOG_LEVEL: ${LOG_LEVEL:-INFO}
       group_add:
         - "124"
       volumes:
