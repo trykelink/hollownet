@@ -28,3 +28,5 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 - [2026-04-08] Added greenlet to collector dependencies
 - [2026-04-08] Fixed cached datetime normalization in IP enricher
 - [2026-04-08] Normalized returned IP intel datetimes across backends
+- [2026-04-08] Added collector service, Dockerfile, and .env.example to compose
+- [2026-04-08] Moved POSTGRES_PASSWORD to env; added non-root user to Dockerfile
