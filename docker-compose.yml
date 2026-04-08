@@ -26,13 +26,15 @@ services:
       timeout: 5s
       retries: 5
 
-  collector:
+collector:
     build: ./collector
     container_name: hollownet-collector
     depends_on:
       postgres:
         condition: service_healthy
     env_file: .env
+    group_add:
+      - "124"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - cowrie_logs:/cowrie/cowrie-git/var/log/cowrie:ro
