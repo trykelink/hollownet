@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_COWRIE_LOG_PATH = "/cowrie/cowrie-git/var/log/cowrie/cowrie.json"
 BRUTE_FORCE_THRESHOLD = 5
 BRUTE_FORCE_WINDOW = timedelta(seconds=60)
+DEFAULT_ALERT_COOLDOWN_SECONDS = 300
 
 
 class CollectorSettings(BaseModel):
@@ -58,6 +59,9 @@ class CollectorSettings(BaseModel):
     container_name: str = Field(default_factory=lambda: os.getenv("DOCKER_CONTAINER_NAME", "hollownet-cowrie"))
     cowrie_log_path: str = DEFAULT_COWRIE_LOG_PATH
     poll_interval_seconds: int = 30
+    alert_cooldown_seconds: int = Field(
+        default_factory=lambda: int(os.getenv("ALERT_COOLDOWN_SECONDS", str(DEFAULT_ALERT_COOLDOWN_SECONDS)))
+    )
     abuseipdb_api_key: str | None = Field(default_factory=lambda: os.getenv("ABUSEIPDB_API_KEY"))
     telegram_bot_token: str | None = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN"))
     telegram_chat_id: str | None = Field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID"))
@@ -146,6 +150,7 @@ class CollectorService:
         log_source: CowrieDockerLogSource,
         notifier: TelegramNotifier,
         poll_interval_seconds: int = 30,
+        alert_cooldown_seconds: int = DEFAULT_ALERT_COOLDOWN_SECONDS,
     ) -> None:
         self._session_factory = session_factory
         self._enricher = enricher
@@ -153,6 +158,8 @@ class CollectorService:
         self._notifier = notifier
         self._poll_interval_seconds = poll_interval_seconds
         self._failed_login_attempts: dict[str, deque[datetime]] = defaultdict(deque)
+        self._alert_cooldowns: dict[str, datetime] = {}
+        self._alert_cooldown = timedelta(seconds=alert_cooldown_seconds)
 
     async def poll_once(self) -> int:
         """Read, parse, persist, and enrich one batch of Cowrie logs."""
@@ -241,7 +248,13 @@ class CollectorService:
             attempts.popleft()
 
         if len(attempts) >= BRUTE_FORCE_THRESHOLD:
+            last_alert_at = self._alert_cooldowns.get(event.src_ip)
+            if last_alert_at is not None and event.timestamp - last_alert_at < self._alert_cooldown:
+                logger.debug("Skipping brute force alert for %s; cooldown active", event.src_ip)
+                return
+
             await self._notifier.send(_build_brute_force_alert(event.src_ip, len(attempts), intel_record))
+            self._alert_cooldowns[event.src_ip] = event.timestamp
 
 
 def create_app(
@@ -294,6 +307,7 @@ def create_app(
             log_source=resolved_log_source,
             notifier=resolved_notifier,
             poll_interval_seconds=resolved_settings.poll_interval_seconds,
+            alert_cooldown_seconds=resolved_settings.alert_cooldown_seconds,
         )
 
         if managed_engine is not None:

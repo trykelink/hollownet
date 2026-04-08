@@ -183,6 +183,85 @@ async def test_collector_service_sends_brute_force_alert_after_five_failed_login
 
 
 @pytest.mark.asyncio
+async def test_collector_service_sends_only_one_brute_force_alert_during_sustained_attack(
+    tmp_path: Path,
+) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'collector-sustained-attack.db'}"
+    engine = build_async_engine(DatabaseSettings(database_url=database_url))
+    session_factory = create_session_factory(engine)
+    await init_database(engine)
+    notifier = StubNotifier()
+    service = CollectorService(
+        session_factory,
+        enricher=StubEnricher(),
+        log_source=StaticLogSource([]),
+        notifier=notifier,
+    )
+    base_time = datetime(2026, 4, 8, 12, 20, tzinfo=timezone.utc)
+    events = [
+        _build_event(
+            event_id=f"sustained-{index}",
+            event_name="cowrie.login.failed",
+            session=f"sustained-session-{index}",
+            src_ip="203.0.113.70",
+            timestamp=base_time + timedelta(seconds=offset),
+        )
+        for index, offset in enumerate((0, 5, 10, 15, 20, 25, 30, 35, 40, 45), start=1)
+    ]
+
+    inserted_count = await service.store_events(events)
+
+    assert inserted_count == 10
+    assert len(notifier.messages) == 1
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_collector_service_sends_second_brute_force_alert_after_cooldown_expires(
+    tmp_path: Path,
+) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'collector-cooldown-reset.db'}"
+    engine = build_async_engine(DatabaseSettings(database_url=database_url))
+    session_factory = create_session_factory(engine)
+    await init_database(engine)
+    notifier = StubNotifier()
+    service = CollectorService(
+        session_factory,
+        enricher=StubEnricher(),
+        log_source=StaticLogSource([]),
+        notifier=notifier,
+    )
+    base_time = datetime(2026, 4, 8, 12, 30, tzinfo=timezone.utc)
+    first_wave = [
+        _build_event(
+            event_id=f"cooldown-first-{index}",
+            event_name="cowrie.login.failed",
+            session=f"cooldown-first-session-{index}",
+            src_ip="203.0.113.71",
+            timestamp=base_time + timedelta(seconds=offset),
+        )
+        for index, offset in enumerate((0, 5, 10, 15, 20, 25, 30, 35, 40, 45), start=1)
+    ]
+    second_wave_start = base_time + timedelta(seconds=321)
+    second_wave = [
+        _build_event(
+            event_id=f"cooldown-second-{index}",
+            event_name="cowrie.login.failed",
+            session=f"cooldown-second-session-{index}",
+            src_ip="203.0.113.71",
+            timestamp=second_wave_start + timedelta(seconds=offset),
+        )
+        for index, offset in enumerate((0, 5, 10, 15, 20), start=1)
+    ]
+
+    inserted_count = await service.store_events(first_wave + second_wave)
+
+    assert inserted_count == 15
+    assert len(notifier.messages) == 2
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_collector_service_does_not_alert_for_four_failed_logins(
     tmp_path: Path,
 ) -> None:
