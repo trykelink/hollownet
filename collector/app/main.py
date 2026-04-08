@@ -7,7 +7,9 @@ import io
 import logging
 import os
 import tarfile
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import Depends, FastAPI, Query
@@ -23,7 +25,8 @@ from collector.app.database import (
     init_database,
 )
 from collector.app.enricher import AbuseIPDBClient, IPEnricher
-from collector.app.models import EventRecord
+from collector.app.models import EventRecord, IPIntelRecord
+from collector.app.notifier import TelegramNotifier
 from collector.app.parser import ParsedEvent, parse_log_lines
 
 try:
@@ -42,6 +45,8 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 DEFAULT_COWRIE_LOG_PATH = "/cowrie/cowrie-git/var/log/cowrie/cowrie.json"
+BRUTE_FORCE_THRESHOLD = 5
+BRUTE_FORCE_WINDOW = timedelta(seconds=60)
 
 
 class CollectorSettings(BaseModel):
@@ -54,6 +59,8 @@ class CollectorSettings(BaseModel):
     cowrie_log_path: str = DEFAULT_COWRIE_LOG_PATH
     poll_interval_seconds: int = 30
     abuseipdb_api_key: str | None = Field(default_factory=lambda: os.getenv("ABUSEIPDB_API_KEY"))
+    telegram_bot_token: str | None = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN"))
+    telegram_chat_id: str | None = Field(default_factory=lambda: os.getenv("TELEGRAM_CHAT_ID"))
 
 
 class HealthResponse(BaseModel):
@@ -137,12 +144,15 @@ class CollectorService:
         *,
         enricher: IPEnricher,
         log_source: CowrieDockerLogSource,
+        notifier: TelegramNotifier,
         poll_interval_seconds: int = 30,
     ) -> None:
         self._session_factory = session_factory
         self._enricher = enricher
         self._log_source = log_source
+        self._notifier = notifier
         self._poll_interval_seconds = poll_interval_seconds
+        self._failed_login_attempts: dict[str, deque[datetime]] = defaultdict(deque)
 
     async def poll_once(self) -> int:
         """Read, parse, persist, and enrich one batch of Cowrie logs."""
@@ -185,10 +195,13 @@ class CollectorService:
             await session.commit()
 
         for event in new_events:
+            intel_record: IPIntelRecord | None = None
             try:
-                await self._enricher.enrich_ip(event.src_ip, last_seen=event.timestamp)
+                intel_record = await self._enricher.enrich_ip(event.src_ip, last_seen=event.timestamp)
             except Exception:
                 logger.exception("IP enrichment failed for %s", event.src_ip)
+
+            await self._maybe_send_alert(event, intel_record)
 
         return len(new_events)
 
@@ -207,6 +220,29 @@ class CollectorService:
             except asyncio.TimeoutError:
                 continue
 
+    async def _maybe_send_alert(
+        self,
+        event: ParsedEvent,
+        intel_record: IPIntelRecord | None,
+    ) -> None:
+        event_name = str(event.raw.get("eventid", ""))
+
+        if event_name == "cowrie.login.success":
+            await self._notifier.send(_build_login_success_alert(event, intel_record))
+            return
+
+        if event_name != "cowrie.login.failed":
+            return
+
+        attempts = self._failed_login_attempts[event.src_ip]
+        attempts.append(event.timestamp)
+        window_start = event.timestamp - BRUTE_FORCE_WINDOW
+        while attempts and attempts[0] < window_start:
+            attempts.popleft()
+
+        if len(attempts) >= BRUTE_FORCE_THRESHOLD:
+            await self._notifier.send(_build_brute_force_alert(event.src_ip, len(attempts), intel_record))
+
 
 def create_app(
     settings: CollectorSettings | None = None,
@@ -215,6 +251,7 @@ def create_app(
     session_factory: async_sessionmaker[AsyncSession] | None = None,
     log_source: CowrieDockerLogSource | None = None,
     enricher: IPEnricher | None = None,
+    notifier: TelegramNotifier | None = None,
     start_background_task: bool = True,
 ) -> FastAPI:
     """Create the FastAPI collector application."""
@@ -236,13 +273,6 @@ def create_app(
         session_factory,
         abuse_lookup=AbuseIPDBClient(resolved_settings.abuseipdb_api_key).lookup,
     )
-    collector_service = CollectorService(
-        session_factory,
-        enricher=resolved_enricher,
-        log_source=resolved_log_source,
-        poll_interval_seconds=resolved_settings.poll_interval_seconds,
-    )
-
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # noqa: ANN001
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -251,12 +281,27 @@ def create_app(
         logging.getLogger("app").setLevel(log_level)
         logging.getLogger().setLevel(log_level)
 
+        resolved_notifier = notifier or TelegramNotifier(
+            resolved_settings.telegram_bot_token,
+            resolved_settings.telegram_chat_id,
+        )
+        if not resolved_notifier.is_configured:
+            logger.warning("Telegram alerts disabled; missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
+
+        application.state.collector_service = CollectorService(
+            session_factory,
+            enricher=resolved_enricher,
+            log_source=resolved_log_source,
+            notifier=resolved_notifier,
+            poll_interval_seconds=resolved_settings.poll_interval_seconds,
+        )
+
         if managed_engine is not None:
             await init_database(managed_engine)
 
         if start_background_task:
             application.state.collector_task = asyncio.create_task(
-                collector_service.run(application.state.stop_event)
+                application.state.collector_service.run(application.state.stop_event)
             )
 
         yield
@@ -274,7 +319,7 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.engine = managed_engine
     app.state.session_factory = session_factory
-    app.state.collector_service = collector_service
+    app.state.collector_service = None
     app.state.stop_event = asyncio.Event()
     app.state.collector_task = None
 
@@ -318,6 +363,44 @@ def _decode_archive_result(archive_result: Any) -> tuple[int | None, bytes]:
         return exit_code, b"".join(stream)
 
     return getattr(archive_result, "exit_code", None), getattr(archive_result, "output", b"")
+
+
+def _build_brute_force_alert(
+    src_ip: str,
+    attempt_count: int,
+    intel_record: IPIntelRecord | None,
+) -> str:
+    country, abuse_score = _format_intel(intel_record)
+    return (
+        "🚨 Brute force detectado\n"
+        f"IP: {src_ip}\n"
+        f"País: {country} ({abuse_score}/100)\n"
+        f"Intentos: {attempt_count} en 60s"
+    )
+
+
+def _build_login_success_alert(
+    event: ParsedEvent,
+    intel_record: IPIntelRecord | None,
+) -> str:
+    country, abuse_score = _format_intel(intel_record)
+    return (
+        "⚠️ Login exitoso en honeypot\n"
+        f"IP: {event.src_ip}\n"
+        f"País: {country} ({abuse_score}/100)\n"
+        f"Usuario: {event.username or '-'}\n"
+        f"Password: {event.password or '-'}"
+    )
+
+
+def _format_intel(intel_record: IPIntelRecord | None) -> tuple[str, str]:
+    country = intel_record.country if intel_record is not None and intel_record.country else "Unknown"
+    abuse_score = (
+        str(intel_record.abuse_score)
+        if intel_record is not None and intel_record.abuse_score is not None
+        else "n/a"
+    )
+    return country, abuse_score
 
 
 def _extract_tar_file_lines(archive_bytes: bytes) -> list[str]:
