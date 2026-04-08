@@ -14,3 +14,17 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 
 ## Log
 - [2026-04-08] Cowrie honeypot running, Cloudflare Tunnel validated, repo initialized
+- [2026-04-08] Added async collector database engine and session helpers
+- [2026-04-08] Added collector ORM models for events and IP intelligence
+- [2026-04-08] Added Cowrie event parser with normalization and deduping
+- [2026-04-08] Added lazy IP enricher with AbuseIPDB caching
+- [2026-04-08] Added collector FastAPI app and Cowrie polling loop
+- [2026-04-08] Added database tests for engine, sessions, and schema
+- [2026-04-08] Added ORM tests for events and IP intelligence
+- [2026-04-08] Added parser tests for supported and invalid Cowrie logs
+- [2026-04-08] Added enricher tests for caching and provider failures
+- [2026-04-08] Added main service and API tests for collector
+- [2026-04-08] Added collector Python dependency manifest
+- [2026-04-08] Added greenlet to collector dependencies
+- [2026-04-08] Fixed cached datetime normalization in IP enricher
+- [2026-04-08] Normalized returned IP intel datetimes across backends
