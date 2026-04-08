@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 
 import pytest
 
@@ -32,10 +33,13 @@ def test_parse_event_normalizes_supported_payload() -> None:
     parsed_event = parse_event(payload)
 
     assert parsed_event is not None
-    assert parsed_event.event_id == "event-123"
+    assert parsed_event.event_id == hashlib.sha1(
+        "session-123:cowrie.command.input:2026-04-08T12:30:45.000000Z".encode("utf-8")
+    ).hexdigest()
     assert parsed_event.command == "whoami"
     assert parsed_event.protocol == "ssh"
     assert parsed_event.raw["eventid"] == "cowrie.command.input"
+    assert parsed_event.raw["uuid"] == "event-123"
 
 
 def test_parse_event_returns_none_for_unsupported_event() -> None:
@@ -69,7 +73,7 @@ def test_parse_event_returns_none_and_warns_when_required_fields_missing(
     assert any("missing required fields" in record.message for record in caplog.records)
 
 
-def test_parse_log_lines_generate_stable_hash_ids_without_uuid() -> None:
+def test_parse_log_lines_generate_stable_hash_ids_from_event_identity() -> None:
     payload = {
         "eventid": "cowrie.login.failed",
         "session": "session-2",
@@ -84,3 +88,6 @@ def test_parse_log_lines_generate_stable_hash_ids_without_uuid() -> None:
 
     assert len(parsed_events) == 2
     assert parsed_events[0].event_id == parsed_events[1].event_id
+    assert parsed_events[0].event_id == hashlib.sha1(
+        "session-2:cowrie.login.failed:2026-04-08T13:00:00.000000Z".encode("utf-8")
+    ).hexdigest()

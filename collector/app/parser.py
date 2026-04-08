@@ -113,13 +113,14 @@ def parse_log_lines(lines: Iterable[str]) -> list[ParsedEvent]:
 
 
 def _derive_event_id(payload: Mapping[str, Any]) -> str:
-    for candidate_key in ("uuid", "event_uuid", "event_id", "message_id"):
-        candidate_value = payload.get(candidate_key)
-        if candidate_value:
-            return str(candidate_value)
-
-    canonical_payload = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical_payload.encode("utf-8")).hexdigest()
+    composite_key = ":".join(
+        [
+            str(payload["session"]),
+            str(payload["eventid"]),
+            str(payload["timestamp"]),
+        ]
+    )
+    return hashlib.sha1(composite_key.encode("utf-8")).hexdigest()
 
 
 def _extract_command(payload: Mapping[str, Any]) -> str | None:
