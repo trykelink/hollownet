@@ -26,11 +26,6 @@ from collector.app.enricher import AbuseIPDBClient, IPEnricher
 from collector.app.models import EventRecord
 from collector.app.parser import ParsedEvent, parse_log_lines
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-)
-
 try:
     import docker
     from docker.errors import DockerException, NotFound
@@ -200,6 +195,7 @@ class CollectorService:
     async def run(self, stop_event: asyncio.Event) -> None:
         """Run the collector polling loop until asked to stop."""
 
+        logger.info("Collector poller starting")
         while not stop_event.is_set():
             try:
                 await self.poll_once()
@@ -249,6 +245,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # noqa: ANN001
+        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        logger.setLevel(log_level)
+        logging.getLogger("collector").setLevel(log_level)
+        logging.getLogger("app").setLevel(log_level)
+        logging.getLogger().setLevel(log_level)
+
         if managed_engine is not None:
             await init_database(managed_engine)
 
