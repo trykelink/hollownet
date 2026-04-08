@@ -14,11 +14,28 @@ services:
     environment:
       POSTGRES_DB: hollownet
       POSTGRES_USER: hollownet
-      POSTGRES_PASSWORD: hollownet_dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hollownet -d hollownet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  collector:
+    build: ./collector
+    container_name: hollownet-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - cowrie_logs:/cowrie/cowrie-git/var/log/cowrie:ro
     restart: unless-stopped
 
 volumes:
