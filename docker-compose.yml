@@ -5,8 +5,8 @@ services:
     ports:
       - "2222:2222"
     volumes:
-      - ./cowrie/config:/cowrie/etc
-      - ./cowrie/logs:/cowrie/var/log/cowrie
+    - ./cowrie/config:/cowrie/cowrie-git/etc
+    - ./cowrie/logs:/cowrie/cowrie-git/var/log/cowrie
     restart: unless-stopped
 
   postgres:

@@ -14,3 +14,8 @@ __pycache__/
 # ML
 ml/models/
 ml/data/
+
+.DS_Store
+.claude
+CLAUDE.md
+AGENTS.md
