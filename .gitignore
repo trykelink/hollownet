@@ -1,0 +1,16 @@
+# Logs
+cowrie/logs/*
+!cowrie/logs/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.env
+
+# Docker
+.env
+
+# ML
+ml/models/
+ml/data/

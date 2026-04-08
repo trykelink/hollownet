@@ -1,0 +1,26 @@
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: hollownet-cowrie
+    ports:
+      - "2222:2222"
+    volumes:
+      - ./cowrie/config:/cowrie/etc
+      - ./cowrie/logs:/cowrie/var/log/cowrie
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: hollownet-db
+    environment:
+      POSTGRES_DB: hollownet
+      POSTGRES_USER: hollownet
+      POSTGRES_PASSWORD: hollownet_dev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
