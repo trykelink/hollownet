@@ -37,3 +37,5 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 - [2026-04-08] Added Telegram alerts for brute force and successful logins
 - [2026-04-08] Fixed event deduplication by deriving per-event IDs
 - [2026-04-08] Added Telegram notifier and CollectorService alert triggers
+- [2026-04-08] Added Grafana provisioning and Hollownet threat dashboard
+- [2026-04-08] Made Grafana root URL configurable via environment
