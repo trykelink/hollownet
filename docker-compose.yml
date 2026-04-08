@@ -6,7 +6,7 @@ services:
       - "2222:2222"
     volumes:
     - ./cowrie/config:/cowrie/cowrie-git/etc
-    - ./cowrie/logs:/cowrie/cowrie-git/var/log/cowrie
+    - cowrie_logs:/cowrie/cowrie-git/var/log/cowrie
     restart: unless-stopped
 
   postgres:
@@ -24,3 +24,4 @@ services:
 
 volumes:
   postgres_data:
+  cowrie_logs:
