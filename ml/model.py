@@ -9,6 +9,8 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 
 MIN_TRAINING_EVENTS = 50
+# Normalized anomaly score threshold above which an event counts as anomalous in reports.
+ANOMALY_ALERT_THRESHOLD = 70.0
 
 
 class AnomalyDetector:

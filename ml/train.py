@@ -13,12 +13,12 @@ import psycopg2
 try:
     from ml.database import create_tables, get_events, update_anomaly_scores
     from ml.features import extract_features
-    from ml.model import AnomalyDetector
+    from ml.model import ANOMALY_ALERT_THRESHOLD, MIN_TRAINING_EVENTS, AnomalyDetector
     from ml.notifier import send_daily_report
 except ImportError:  # pragma: no cover
     from database import create_tables, get_events, update_anomaly_scores
     from features import extract_features
-    from model import AnomalyDetector
+    from model import ANOMALY_ALERT_THRESHOLD, MIN_TRAINING_EVENTS, AnomalyDetector
     from notifier import send_daily_report
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def main() -> int:
             logger.info("Loaded %s events for anomaly scoring", len(events))
             stats = _build_base_stats(events)
 
-            if len(events) < 50:
+            if len(events) < MIN_TRAINING_EVENTS:
                 logger.info("Insufficient data for anomaly model: %s events", len(events))
                 stats["insufficient_data"] = True
                 send_daily_report(telegram_bot_token, telegram_chat_id, stats)
@@ -140,7 +140,9 @@ def _build_scored_stats(
             }
         )
 
-    stats["anomaly_count"] = sum(1 for score in score_map.values() if score > 70.0)
+    stats["anomaly_count"] = sum(
+        1 for score in score_map.values() if score > ANOMALY_ALERT_THRESHOLD
+    )
     stats["top_events"] = top_events
     return stats
 
