@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-import tarfile
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,9 +16,8 @@ from collector.app.database import DatabaseSettings, build_async_engine, create_
 from collector.app.main import (
     CollectorService,
     CollectorSettings,
-    CowrieDockerLogSource,
-    DockerException,
-    NotFound,
+    CowrieLogSource,
+    DEFAULT_COWRIE_LOG_PATH,
     create_app,
 )
 from collector.app.models import EventRecord
@@ -70,18 +67,6 @@ class StubNotifier:
 
     async def send(self, message: str) -> None:
         self.messages.append(message)
-
-
-def _build_archive_bytes(file_name: str, content: str) -> bytes:
-    buffer = BytesIO()
-    data = content.encode("utf-8")
-
-    with tarfile.open(fileobj=buffer, mode="w") as archive:
-        tar_info = tarfile.TarInfo(name=file_name)
-        tar_info.size = len(data)
-        archive.addfile(tar_info, BytesIO(data))
-
-    return buffer.getvalue()
 
 
 def _build_event(
@@ -364,20 +349,14 @@ async def test_collector_service_does_not_alert_for_failed_logins_from_different
     await engine.dispose()
 
 
-def test_cowrie_docker_log_source_reads_lines_from_archive() -> None:
-    archive_bytes = _build_archive_bytes(
-        "cowrie.json",
+def test_cowrie_log_source_reads_lines_from_file(tmp_path: Path) -> None:
+    log_file = tmp_path / "cowrie.json"
+    log_file.write_text(
         '{"eventid":"cowrie.login.failed"}\n{"eventid":"cowrie.command.input"}\n',
+        encoding="utf-8",
     )
-    container = Mock()
-    container.get_archive.return_value = ([archive_bytes], {"name": "cowrie.json"})
-    docker_client = Mock()
-    docker_client.containers.get.return_value = container
 
-    log_source = CowrieDockerLogSource(
-        "test-cowrie",
-        docker_client=docker_client,
-    )
+    log_source = CowrieLogSource(str(log_file))
 
     lines = log_source._read_lines_sync()
 
@@ -385,59 +364,44 @@ def test_cowrie_docker_log_source_reads_lines_from_archive() -> None:
         '{"eventid":"cowrie.login.failed"}',
         '{"eventid":"cowrie.command.input"}',
     ]
-    container.get_archive.assert_called_once()
 
 
-def test_cowrie_docker_log_source_returns_empty_lines_for_nonzero_exit_code() -> None:
-    container = Mock()
-    container.get_archive.return_value = ([b"ignored"], 1)
-    docker_client = Mock()
-    docker_client.containers.get.return_value = container
-
-    log_source = CowrieDockerLogSource(
-        "test-cowrie",
-        docker_client=docker_client,
-    )
+def test_cowrie_log_source_returns_empty_lines_for_missing_file() -> None:
+    log_source = CowrieLogSource("/nonexistent/path/cowrie.json")
 
     assert log_source._read_lines_sync() == []
 
 
-def test_cowrie_docker_log_source_returns_empty_lines_when_container_missing() -> None:
-    docker_client = Mock()
-    docker_client.containers.get.side_effect = NotFound("missing")
+def test_cowrie_log_source_advances_offset_on_successive_reads(tmp_path: Path) -> None:
+    log_file = tmp_path / "cowrie.json"
+    log_file.write_text('{"eventid":"cowrie.login.failed"}\n', encoding="utf-8")
 
-    log_source = CowrieDockerLogSource(
-        "test-cowrie",
-        docker_client=docker_client,
-    )
+    log_source = CowrieLogSource(str(log_file))
+    first_lines = log_source._read_lines_sync()
 
-    assert log_source._read_lines_sync() == []
+    with log_file.open("a", encoding="utf-8") as f:
+        f.write('{"eventid":"cowrie.command.input"}\n')
 
+    second_lines = log_source._read_lines_sync()
 
-def test_cowrie_docker_log_source_returns_empty_lines_on_docker_exception() -> None:
-    docker_client = Mock()
-    docker_client.containers.get.side_effect = DockerException("docker failure")
-
-    log_source = CowrieDockerLogSource(
-        "test-cowrie",
-        docker_client=docker_client,
-    )
-
-    assert log_source._read_lines_sync() == []
+    assert first_lines == ['{"eventid":"cowrie.login.failed"}']
+    assert second_lines == ['{"eventid":"cowrie.command.input"}']
 
 
-def test_cowrie_docker_log_source_returns_empty_lines_for_invalid_tar_archive() -> None:
-    container = Mock()
-    container.get_archive.return_value = ([b"not-a-tar-archive"], {"name": "cowrie.json"})
-    docker_client = Mock()
-    docker_client.containers.get.return_value = container
+def test_cowrie_log_source_resets_offset_when_file_is_rotated(tmp_path: Path) -> None:
+    log_file = tmp_path / "cowrie.json"
+    # Write enough content that the rotated (shorter) file triggers the size < offset check.
+    log_file.write_text('{"eventid":"cowrie.login.failed"}\n' * 100, encoding="utf-8")
 
-    log_source = CowrieDockerLogSource(
-        "test-cowrie",
-        docker_client=docker_client,
-    )
+    log_source = CowrieLogSource(str(log_file))
+    log_source._read_lines_sync()  # advance offset to end of large file
 
-    assert log_source._read_lines_sync() == []
+    # Simulate rotation: new file is much smaller than the saved offset.
+    log_file.write_text('{"eventid":"cowrie.session.connect"}\n', encoding="utf-8")
+
+    lines = log_source._read_lines_sync()
+
+    assert lines == ['{"eventid":"cowrie.session.connect"}']
 
 
 def test_create_app_exposes_health_and_recent_events(tmp_path: Path) -> None:
@@ -449,7 +413,6 @@ def test_create_app_exposes_health_and_recent_events(tmp_path: Path) -> None:
     app = create_app(
         CollectorSettings(
             database_url=database_url,
-            container_name="test-cowrie",
             poll_interval_seconds=5,
         ),
         engine=engine,
@@ -487,7 +450,7 @@ def test_create_app_exposes_health_and_recent_events(tmp_path: Path) -> None:
         recent_response = client.get("/events/recent?limit=5")
 
     assert health_response.status_code == 200
-    assert health_response.json()["container_name"] == "test-cowrie"
+    assert health_response.json()["log_path"] == DEFAULT_COWRIE_LOG_PATH
     assert recent_response.status_code == 200
     assert len(recent_response.json()) == 1
     assert recent_response.json()[0]["event_id"] == "recent-1"

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import os
-import tarfile
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -29,19 +27,6 @@ from collector.app.models import EventRecord, IPIntelRecord
 from collector.app.notifier import TelegramNotifier
 from collector.app.parser import ParsedEvent, parse_log_lines
 
-try:
-    import docker
-    from docker.errors import DockerException, NotFound
-except ImportError:  # pragma: no cover
-    docker = None
-
-    class DockerException(Exception):
-        """Fallback Docker exception when the SDK is unavailable."""
-
-    class NotFound(DockerException):
-        """Fallback not-found error when the Docker SDK is unavailable."""
-
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_COWRIE_LOG_PATH = "/cowrie/cowrie-git/var/log/cowrie/cowrie.json"
@@ -56,8 +41,9 @@ class CollectorSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     database_url: str = Field(default_factory=lambda: os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL))
-    container_name: str = Field(default_factory=lambda: os.getenv("DOCKER_CONTAINER_NAME", "hollownet-cowrie"))
-    cowrie_log_path: str = DEFAULT_COWRIE_LOG_PATH
+    cowrie_log_path: str = Field(
+        default_factory=lambda: os.getenv("COWRIE_LOG_PATH", DEFAULT_COWRIE_LOG_PATH)
+    )
     poll_interval_seconds: int = 30
     alert_cooldown_seconds: int = Field(
         default_factory=lambda: int(os.getenv("ALERT_COOLDOWN_SECONDS", str(DEFAULT_ALERT_COOLDOWN_SECONDS)))
@@ -71,7 +57,7 @@ class HealthResponse(BaseModel):
     """Response model for the collector health endpoint."""
 
     status: str
-    container_name: str
+    log_path: str
     poll_interval_seconds: int
 
 
@@ -90,52 +76,35 @@ class EventResponse(BaseModel):
     raw: dict[str, Any]
 
 
-class CowrieDockerLogSource:
-    """Read Cowrie JSON logs from the honeypot container through Docker SDK."""
+class CowrieLogSource:
+    """Read Cowrie JSON logs directly from the mounted volume path."""
 
-    def __init__(
-        self,
-        container_name: str,
-        cowrie_log_path: str = DEFAULT_COWRIE_LOG_PATH,
-        *,
-        docker_client: Any | None = None,
-    ) -> None:
-        self._container_name = container_name
-        self._cowrie_log_path = cowrie_log_path
-        self._docker_client = docker_client
+    def __init__(self, log_path: str = DEFAULT_COWRIE_LOG_PATH) -> None:
+        self._log_path = log_path
+        self._offset: int = 0
 
     async def read_lines(self) -> list[str]:
-        """Fetch Cowrie JSON log lines from the container."""
+        """Fetch new Cowrie JSON log lines since the last read."""
 
         return await asyncio.to_thread(self._read_lines_sync)
 
     def _read_lines_sync(self) -> list[str]:
-        if docker is None and self._docker_client is None:
-            logger.warning("Docker SDK is unavailable; skipping Cowrie poll")
-            return []
-
         try:
-            if self._docker_client is None:
-                self._docker_client = docker.from_env()
-
-            container = self._docker_client.containers.get(self._container_name)
-            archive_result = container.get_archive(self._cowrie_log_path)
-        except NotFound:
-            logger.warning("Cowrie container %s was not found", self._container_name)
+            with open(self._log_path, encoding="utf-8", errors="ignore") as log_file:
+                log_file.seek(0, 2)
+                file_size = log_file.tell()
+                if file_size < self._offset:
+                    logger.info("Cowrie log file appears rotated; resetting read offset")
+                    self._offset = 0
+                log_file.seek(self._offset)
+                content = log_file.read()
+                self._offset = log_file.tell()
+            return [line for line in content.splitlines() if line.strip()]
+        except FileNotFoundError:
+            logger.warning("Cowrie log file not found: %s", self._log_path)
             return []
-        except DockerException:
-            logger.exception("Failed to read Cowrie logs via Docker SDK")
-            return []
-
-        exit_code, output = _decode_archive_result(archive_result)
-        if exit_code not in (0, None):
-            logger.warning("Cowrie log read returned exit code %s", exit_code)
-            return []
-
-        try:
-            return _extract_tar_file_lines(output)
-        except (tarfile.TarError, OSError):
-            logger.exception("Failed to extract Cowrie log archive from Docker SDK")
+        except OSError:
+            logger.exception("Failed to read Cowrie log file at %s", self._log_path)
             return []
 
 
@@ -147,7 +116,7 @@ class CollectorService:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         enricher: IPEnricher,
-        log_source: CowrieDockerLogSource,
+        log_source: CowrieLogSource,
         notifier: TelegramNotifier,
         poll_interval_seconds: int = 30,
         alert_cooldown_seconds: int = DEFAULT_ALERT_COOLDOWN_SECONDS,
@@ -262,7 +231,7 @@ def create_app(
     *,
     engine: AsyncEngine | None = None,
     session_factory: async_sessionmaker[AsyncSession] | None = None,
-    log_source: CowrieDockerLogSource | None = None,
+    log_source: CowrieLogSource | None = None,
     enricher: IPEnricher | None = None,
     notifier: TelegramNotifier | None = None,
     start_background_task: bool = True,
@@ -278,14 +247,14 @@ def create_app(
         )
         session_factory = create_session_factory(managed_engine)
 
-    resolved_log_source = log_source or CowrieDockerLogSource(
-        resolved_settings.container_name,
+    resolved_log_source = log_source or CowrieLogSource(
         resolved_settings.cowrie_log_path,
     )
     resolved_enricher = enricher or IPEnricher(
         session_factory,
         abuse_lookup=AbuseIPDBClient(resolved_settings.abuseipdb_api_key).lookup,
     )
+
     @asynccontextmanager
     async def lifespan(application: FastAPI):  # noqa: ANN001
         log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -349,7 +318,7 @@ def create_app(
         await session.execute(text("SELECT 1"))
         return HealthResponse(
             status="ok",
-            container_name=resolved_settings.container_name,
+            log_path=resolved_settings.cowrie_log_path,
             poll_interval_seconds=resolved_settings.poll_interval_seconds,
         )
 
@@ -368,15 +337,6 @@ def create_app(
         ]
 
     return app
-
-
-def _decode_archive_result(archive_result: Any) -> tuple[int | None, bytes]:
-    if isinstance(archive_result, tuple):
-        stream, metadata = archive_result
-        exit_code = metadata if isinstance(metadata, int) else None
-        return exit_code, b"".join(stream)
-
-    return getattr(archive_result, "exit_code", None), getattr(archive_result, "output", b"")
 
 
 def _build_brute_force_alert(
@@ -415,22 +375,6 @@ def _format_intel(intel_record: IPIntelRecord | None) -> tuple[str, str]:
         else "n/a"
     )
     return country, abuse_score
-
-
-def _extract_tar_file_lines(archive_bytes: bytes) -> list[str]:
-    tar_buffer = io.BytesIO(archive_bytes)
-    with tarfile.open(fileobj=tar_buffer, mode="r:*") as archive:
-        for member in archive:
-            if not member.isfile():
-                continue
-
-            extracted_file = archive.extractfile(member)
-            if extracted_file is None:
-                continue
-
-            return extracted_file.read().decode("utf-8", errors="ignore").splitlines()
-
-    return []
 
 
 try:
