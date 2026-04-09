@@ -44,7 +44,7 @@ jobs:
           cache-dependency-path: ml/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r ml/requirements.txt
+        run: pip install -r ml/requirements.txt pytest
 
       - name: Run ML tests
         run: pytest ml/tests/ -v
