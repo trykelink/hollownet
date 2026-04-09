@@ -17,8 +17,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hollownet -d hollownet"]
@@ -35,10 +33,7 @@ services:
       env_file: .env
       environment:
         LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      group_add:
-        - "124"
       volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
         - cowrie_logs:/cowrie/cowrie-git/var/log/cowrie:ro
       restart: unless-stopped
 
@@ -46,7 +41,7 @@ services:
     image: grafana/grafana-oss:latest
     container_name: hollownet-grafana
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
