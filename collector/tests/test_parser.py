@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import logging
 import hashlib
+import logging
 
 import pytest
 
@@ -33,9 +33,7 @@ def test_parse_event_normalizes_supported_payload() -> None:
     parsed_event = parse_event(payload)
 
     assert parsed_event is not None
-    assert parsed_event.event_id == hashlib.sha1(
-        "session-123:cowrie.command.input:2026-04-08T12:30:45.000000Z".encode("utf-8")
-    ).hexdigest()
+    assert parsed_event.event_id == "event-123"
     assert parsed_event.command == "whoami"
     assert parsed_event.protocol == "ssh"
     assert parsed_event.raw["eventid"] == "cowrie.command.input"
@@ -73,7 +71,7 @@ def test_parse_event_returns_none_and_warns_when_required_fields_missing(
     assert any("missing required fields" in record.message for record in caplog.records)
 
 
-def test_parse_log_lines_generate_stable_hash_ids_from_event_identity() -> None:
+def test_parse_log_lines_generate_stable_hash_ids_from_raw_payload_without_uuid() -> None:
     payload = {
         "eventid": "cowrie.login.failed",
         "session": "session-2",
@@ -88,6 +86,30 @@ def test_parse_log_lines_generate_stable_hash_ids_from_event_identity() -> None:
 
     assert len(parsed_events) == 2
     assert parsed_events[0].event_id == parsed_events[1].event_id
-    assert parsed_events[0].event_id == hashlib.sha1(
-        "session-2:cowrie.login.failed:2026-04-08T13:00:00.000000Z".encode("utf-8")
+    assert parsed_events[0].event_id == hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def test_parse_event_generates_distinct_ids_for_same_timestamp_with_different_payloads() -> None:
+    first_payload = {
+        "eventid": "cowrie.command.input",
+        "session": "shared-session",
+        "src_ip": "198.51.100.42",
+        "timestamp": "2026-04-08T13:00:00.000000Z",
+        "input": "uname -a",
+    }
+    second_payload = {
+        "eventid": "cowrie.command.input",
+        "session": "shared-session",
+        "src_ip": "198.51.100.42",
+        "timestamp": "2026-04-08T13:00:00.000000Z",
+        "input": "whoami",
+    }
+
+    first_event = parse_event(first_payload)
+    second_event = parse_event(second_payload)
+
+    assert first_event is not None
+    assert second_event is not None
+    assert first_event.event_id != second_event.event_id

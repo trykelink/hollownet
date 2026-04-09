@@ -113,14 +113,16 @@ def parse_log_lines(lines: Iterable[str]) -> list[ParsedEvent]:
 
 
 def _derive_event_id(payload: Mapping[str, Any]) -> str:
-    composite_key = ":".join(
-        [
-            str(payload["session"]),
-            str(payload["eventid"]),
-            str(payload["timestamp"]),
-        ]
+    event_uuid = _optional_string(payload.get("uuid"))
+    if event_uuid is not None:
+        return event_uuid
+
+    serialized_payload = json.dumps(
+        dict(payload),
+        sort_keys=True,
+        separators=(",", ":"),
     )
-    return hashlib.sha1(composite_key.encode("utf-8")).hexdigest()
+    return hashlib.sha256(serialized_payload.encode("utf-8")).hexdigest()
 
 
 def _extract_command(payload: Mapping[str, Any]) -> str | None:
