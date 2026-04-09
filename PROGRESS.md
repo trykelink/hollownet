@@ -44,3 +44,4 @@ Collector: `database.py` → `models.py` → `parser.py` → `enricher.py` → `
 - [2026-04-08] Added ML review fixes with non-root Dockerfile and mocked tests
 - [2026-04-08] Hardened security: pinned deps, removed Docker socket, locked DB and Grafana ports
 - [2026-04-08] Removed dead ML cron shim; systemd timer is scheduler of record
+- [2026-04-08] Added GitHub Actions CI for collector and ML tests
