@@ -1,6 +1,6 @@
 services:
   cowrie:
-    image: cowrie/cowrie:latest
+    image: cowrie/cowrie:2.9.0
     container_name: hollownet-cowrie
     ports:
       - "2222:2222"
@@ -38,7 +38,7 @@ services:
       restart: unless-stopped
 
   grafana:
-    image: grafana/grafana-oss:latest
+    image: grafana/grafana-oss:11.0.0
     container_name: hollownet-grafana
     ports:
       - "127.0.0.1:3000:3000"
