@@ -49,5 +49,5 @@ class TelegramNotifier:
             async with httpx.AsyncClient(timeout=10.0) as http_client:
                 response = await http_client.post(request_url, json=payload)
                 response.raise_for_status()
-        except Exception:
-            logger.error("Failed to send Telegram alert", exc_info=True)
+        except Exception as exc:
+            logger.error("Failed to send Telegram alert: %s", type(exc).__name__)

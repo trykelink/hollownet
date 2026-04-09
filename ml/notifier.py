@@ -31,8 +31,8 @@ def send_daily_report(
                 },
             )
             response.raise_for_status()
-    except Exception:
-        logger.error("Failed to send ML Telegram report", exc_info=True)
+    except Exception as exc:
+        logger.error("Failed to send ML Telegram report: %s", type(exc).__name__)
 
 
 def _format_daily_report(stats: dict[str, Any]) -> str:
