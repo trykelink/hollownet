@@ -15,7 +15,9 @@
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12">
   <img src="https://img.shields.io/badge/fastapi-0.111-green" alt="FastAPI">
   <img src="https://img.shields.io/badge/license-MIT-black" alt="MIT License">
-  <img src="https://img.shields.io/badge/tests-49%20passing-brightgreen" alt="49 tests passing">
+  <a href="https://github.com/trykelink/hollownet/actions/workflows/ci.yml">
+  <img src="https://github.com/trykelink/hollownet/actions/workflows/ci.yml/badge.svg" alt="CI">
+</a>
   <img src="https://img.shields.io/badge/cowrie-2.9.0-orange" alt="Cowrie 2.9.0">
 </p>
 
