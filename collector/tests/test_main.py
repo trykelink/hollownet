@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from collector.app.database import DatabaseSettings, build_async_engine, create_session_factory, init_database
+
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
 from collector.app.main import (
     CollectorService,
     CollectorSettings,

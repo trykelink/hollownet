@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncGenerator
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -306,7 +307,7 @@ def create_app(
     app.state.stop_event = asyncio.Event()
     app.state.collector_task = None
 
-    async def get_db_session() -> AsyncSession:
+    async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         async with session_factory() as session:
             yield session
 
@@ -375,10 +376,4 @@ def _format_intel(intel_record: IPIntelRecord | None) -> tuple[str, str]:
         else "n/a"
     )
     return country, abuse_score
-
-
-try:
-    app = create_app()
-except Exception:  # pragma: no cover
-    logger.warning("Default app initialization skipped; DATABASE_URL must be set explicitly")
-    app = FastAPI(title="Hollownet Collector")
+app = create_app()
